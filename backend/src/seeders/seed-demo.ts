@@ -6,15 +6,26 @@ import { generateTableQr } from '../services/qrcode.service';
 
 async function seed() {
   await initDb();
-  // create admin
+  // create admin - use findOrCreate to avoid duplicates
   const passwordHash = await bcrypt.hash('password', 10);
-  await (User as any).create({ name: 'Admin', email: 'admin@example.com', passwordHash, role: 'admin' }).catch(() => {});
+  const [user, created] = await (User as any).findOrCreate({
+    where: { email: 'admin@example.com' },
+    defaults: { name: 'Admin', email: 'admin@example.com', passwordHash, role: 'admin' }
+  });
+  if (!created) {
+    // Update existing user password
+    user.passwordHash = passwordHash;
+    await user.save();
+    console.log('Admin user updated');
+  } else {
+    console.log('Admin user created');
+  }
 
   // create hotel + tables + menu
-  const hotel = await (Hotel as any).create({ name: 'Demo Coffee', slug: 'demo-coffee', address: '123 Demo St', tablesCount: 10, onboardedAt: new Date() });
+  const hotel = await (Hotel as any).create({ name: 'Demo Coffee', slug: 'demo-coffee', address: '123 Demo St', tablesCount: 10, onboardedAt: new Date(), ownerId: user.id });
   for (let i = 1; i <= 10; i++) {
     const table = await (Table as any).create({ hotelId: hotel.id, number: i });
-    const qrPath = await generateTableQr(hotel.id, hotel.slug, i);
+    const { path: qrPath } = await generateTableQr(hotel.id, hotel.slug, i);
     table.qrPath = qrPath;
     await table.save();
   }

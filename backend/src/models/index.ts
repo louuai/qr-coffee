@@ -5,7 +5,7 @@ dotenv.config();
 const dbHost = process.env.DB_HOST || 'localhost';
 const dbPort = Number(process.env.DB_PORT || 3306);
 const dbUser = process.env.DB_USER || 'root';
-const dbPass = process.env.DB_PASS || 'secret';
+const dbPass = process.env.DB_PASS || '';  // Changed default from 'secret' to ''
 const dbName = process.env.DB_NAME || 'rasops_qr';
 
 export const sequelize = new Sequelize(dbName, dbUser, dbPass, {
@@ -27,7 +27,11 @@ export async function initDb() {
       name: { type: DataTypes.STRING, allowNull: false },
       slug: { type: DataTypes.STRING, allowNull: false },
       address: { type: DataTypes.TEXT },
+      location: { type: DataTypes.STRING },
+      businessPhone: { type: DataTypes.STRING },
+      personalPhone: { type: DataTypes.STRING },
       tablesCount: { type: DataTypes.INTEGER, defaultValue: 0 },
+      ownerId: { type: DataTypes.INTEGER, allowNull: true },
     },
     { sequelize, modelName: 'hotel' }
   );
@@ -74,7 +78,12 @@ export async function initDb() {
       passwordHash: { type: DataTypes.STRING, allowNull: false },
       role: { type: DataTypes.STRING, defaultValue: 'admin' },
     },
-    { sequelize, modelName: 'user' }
+    { 
+      sequelize, 
+      modelName: 'user',
+      tableName: 'users',
+      timestamps: false  // Désactivé car la table existe déjà sans ces colonnes
+    }
   );
 
   // Associations
@@ -90,7 +99,16 @@ export async function initDb() {
   (Table as any).hasMany(Order, { foreignKey: 'tableId', as: 'orders' });
   (Order as any).belongsTo(Table, { foreignKey: 'tableId' });
 
-  await sequelize.sync();
+  (User as any).hasMany(Hotel, { foreignKey: 'ownerId', as: 'hotels' });
+  (Hotel as any).belongsTo(User, { foreignKey: 'ownerId', as: 'owner' });
+
+  try {
+    await sequelize.sync({ alter: true });
+    console.log('Database tables synchronized');
+  } catch (err) {
+    // don't crash the server if sync fails (DB may already be migrated or permissions differ)
+    console.warn('Warning: sequelize.sync() failed, continuing without sync. Error:', err && (err as any).message ? (err as any).message : err);
+  }
 }
 
 export default sequelize;

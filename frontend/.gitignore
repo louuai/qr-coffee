@@ -1,0 +1,18 @@
+# Old React files
+src/
+node_modules/
+package-lock.json
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+vite-env.d.ts
+
+# Keep only new HTML/CSS/JS structure
+# New structure:
+# - index.html
+# - css/style.css
+# - js/api.js, auth.js, app.js
+# - admin/login.html
+# - nginx.conf
+# - Dockerfile
+

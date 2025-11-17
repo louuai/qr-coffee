@@ -6,7 +6,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${DB_PASS:-secret}
       MYSQL_DATABASE: ${DB_NAME:-rasops_qr}
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - db-data:/var/lib/mysql
 
@@ -21,21 +21,17 @@ services:
     depends_on:
       - db
     volumes:
-      - ./backend:/usr/src/app
       - ./backend/public/qrcodes:/usr/src/app/public/qrcodes
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    env_file:
-      - ./.env
     ports:
-      - "5173:5173"
+      - "5173:80"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/usr/src/app
+    # The built image already contains the compiled app; avoid mounting source over it
 
 volumes:
   db-data:

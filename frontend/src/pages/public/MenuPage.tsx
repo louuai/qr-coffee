@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../api/axios';
 
 export default function MenuPage() {
   const { hotelSlug } = useParams();
@@ -10,7 +10,7 @@ export default function MenuPage() {
   const [hotel, setHotel] = useState<any>(null);
 
   useEffect(() => {
-    axios.get(`/api/menu/${hotelSlug}`).then((r) => {
+    api.get(`/menu/${hotelSlug}`).then((r) => {
       setHotel(r.data.hotel);
       setMenu(r.data.menu || []);
     });
@@ -31,3 +31,4 @@ export default function MenuPage() {
     </div>
   );
 }
+
