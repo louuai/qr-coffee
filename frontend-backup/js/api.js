@@ -17,11 +17,10 @@ let mockMode = false;
 // Mode mock activé par défaut (évite les erreurs si le backend n'est pas lancé).
 // Pour forcer le backend réel : setUseMockBackend(false) dans la console.
 const storedUseMock = localStorage.getItem('useMockBackend');
+// Prefer the real backend; allow mock only when explicitly forced.
 const useMockFlag = typeof window !== 'undefined' && window.FORCE_MOCK_API
   ? true
-  : storedUseMock === 'false'
-    ? false
-    : true;
+  : storedUseMock === 'true';
 
 console.log('API_BASE_URL resolved to:', API_BASE_URL);
 if (useMockFlag) console.log('Mock backend actif (useMockBackend=true)');
@@ -417,7 +416,7 @@ const api = {
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    if (useMockFlag) {
+    if (useMockFlag || mockMode) {
       mockMode = true;
       window.MOCK_API_ACTIVE = true;
       return mockApi.handle(endpoint, options.method || 'GET', options.body);
@@ -426,18 +425,42 @@ const api = {
     try {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
       if (!response.ok) {
+        // Clear invalid/expired tokens and redirect to login on 401s
+        if (response.status === 401) {
+          try {
+            if (typeof auth !== 'undefined' && auth.clearToken) auth.clearToken();
+          } catch {}
+          if (typeof window !== 'undefined' && !endpoint.includes('/auth/login')) {
+            window.location.href = '/admin/login.html';
+          }
+        }
         const errorText = await response.text();
         let error;
         try { error = JSON.parse(errorText); } catch { error = { error: errorText || 'Request failed' }; }
-        throw new Error(error.error || 'Request failed');
+
+        // If backend has no data yet (404), fall back to the mock so the UI stays usable.
+        const isHotelEndpoint = /^\/?api\/hotels/i.test(endpoint);
+        if (response.status === 404 && !useMockFlag && isHotelEndpoint) {
+          console.warn('Backend returned 404 on', endpoint, '- switching to mock data for this session');
+          mockMode = true;
+          window.MOCK_API_ACTIVE = true;
+          return mockApi.handle(endpoint, options.method || 'GET', options.body);
+        }
+
+        throw new Error(error.error || `Request failed (status ${response.status})`);
       }
       return response.json();
     } catch (err) {
-      console.warn('API request failed, fallback mock:', err.message || err);
-      mockMode = true;
-      window.MOCK_API_ACTIVE = true;
-      try { localStorage.setItem('useMockBackend', 'true'); } catch {}
-      return mockApi.handle(endpoint, options.method || 'GET', options.body);
+      const msg = err && err.message ? err.message : String(err || '');
+      // If the backend is unreachable (connection refused / network), fallback to mock for this session
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_CONNECTION_REFUSED')) {
+        console.warn('Backend unreachable, switching to mock for this session');
+        mockMode = true;
+        window.MOCK_API_ACTIVE = true;
+        return mockApi.handle(endpoint, options.method || 'GET', options.body);
+      }
+      console.error('API request failed against real backend:', msg);
+      throw err;
     }
   },
   get(endpoint) { return this.request(endpoint, { method: 'GET' }); },

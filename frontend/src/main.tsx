@@ -17,6 +17,7 @@ import Tables from './pages/admin/Tables';
 import Menu from './pages/admin/Menu';
 import Profile from './pages/admin/Profile';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import './styles.css';
 
 const theme = createTheme({
   primaryColor: 'blue',

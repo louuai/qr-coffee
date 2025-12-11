@@ -12,6 +12,8 @@ const app = {
         status: 'all'
     },
     selectedOrders: new Set(),
+    ocrPreviewData: null,
+    ocrUploading: false,
 
     async init() {
         console.log('App initializing...', window.location.pathname);
@@ -22,9 +24,173 @@ const app = {
         this.setupEventListeners();
     },
 
+    setOcrUploadState(isLoading) {
+        this.ocrUploading = isLoading;
+        const btn = document.getElementById('ocr-upload-btn');
+        if (btn) {
+            btn.classList.toggle('is-loading', isLoading);
+            btn.textContent = isLoading ? 'Analyse en cours...' : 'Importer un menu (OCR)';
+        }
+    },
+
+    async uploadOcrImage(file) {
+        const formData = new FormData();
+        formData.append('menuImage', file);
+        if (this.hotelId) formData.append('hotelId', String(this.hotelId));
+        const headers = {};
+        const token = localStorage.getItem('token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const base = (typeof window !== 'undefined' && window.API_BASE_URL) || (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : '');
+        const fallbackHost = `${window.location.protocol}//${window.location.hostname || 'localhost'}:3000`;
+        const endpoint = `${(base || fallbackHost).replace(/\/$/, '')}/api/menu-ocr/upload`;
+        console.log('[OCR] upload endpoint:', endpoint);
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            body: formData,
+            headers
+        });
+        if (!response.ok) {
+            let message = 'Impossible de traiter cette image';
+            try {
+                const errJson = await response.json();
+                if (errJson?.error) message = errJson.error;
+            } catch {}
+            throw new Error(message);
+        }
+        return response.json();
+    },
+
+    triggerOcrUpload() {
+        const input = document.getElementById('menu-ocr-input');
+        if (input) input.click();
+    },
+
+    async handleOcrFileChange(event) {
+        const files = event.target.files ? Array.from(event.target.files) : [];
+        if (!files.length) return;
+        this.setOcrUploadState(true);
+        try {
+            const accumulated = { rawText: '', categories: [], products: [] };
+            for (const file of files) {
+                const payload = await this.uploadOcrImage(file);
+                const debug = payload?.debug || payload || {};
+                if (debug.rawText) {
+                    accumulated.rawText = `${accumulated.rawText}\n${debug.rawText}`.trim();
+                }
+                if (Array.isArray(debug.categories)) {
+                    accumulated.categories.push(...debug.categories.filter(Boolean));
+                }
+                const products = payload?.products || debug?.products || [];
+                accumulated.products.push(...products);
+            }
+            if (!accumulated.products.length) {
+                throw new Error('Aucun produit détecté sur ces images');
+            }
+            this.ocrPreviewData = accumulated;
+            this.showOcrPreviewModal();
+        } catch (error) {
+            console.error('[OCR] upload failed', error);
+            this.showNotification(error.message || 'Import OCR impossible', 'error');
+        } finally {
+            this.setOcrUploadState(false);
+            if (event.target) event.target.value = '';
+        }
+    },
+
+    showOcrPreviewModal() {
+        this.closeOcrPreviewModall();
+        const data = this.ocrPreviewData;
+        if (!data) return;
+        const categoryTitles = Array.from(new Set(
+            (data.categories || []).map(cat => (cat && cat.title) ? cat.title : '').filter(Boolean)
+        ));
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.id = 'ocr-preview-modal';
+        modal.innerHTML = `
+            <div class="modal glass-panel" style="max-width: 640px;">
+                <div class="modal-header">
+                    <h2 class="modal-title">Prévisualisation OCR</h2>
+                    <button class="modal-close" onclick="app.closeOcrPreviewModall()">×</button>
+                </div>
+                <div class="modal-body">
+                    ${categoryTitles.length ? `
+                        <div class="ocr-preview-info">
+                            <p><strong>Catégories détectées:</strong> ${categoryTitles.join(', ')}</p>
+                        </div>
+                    ` : ''}
+                    <div class="ocr-preview-list">
+                        ${data.products.map((product, index) => `
+                            <div class="ocr-preview-item">
+                                <div>
+                                    <p class="ocr-preview-name">${product.name || 'Produit'}</p>
+                                    <p class="ocr-preview-category">${product.category || 'Catégorie inconnue'}</p>
+                                </div>
+                                <p class="ocr-preview-price">
+                                    ${typeof product.price === 'number' && !Number.isNaN(product.price) ? product.price.toFixed(2) + ' DT' : 'Prix ?'}
+                                </p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="app.closeOcrPreviewModall()">Annuler</button>
+                    <button class="btn btn-primary" onclick="app.importOcrProducts()">Importer</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    },
+
+    closeOcrPreviewModall() {
+        document.getElementById('ocr-preview-modal')?.remove();
+        this.ocrPreviewData = null;
+    },
+
+    async importOcrProducts() {
+        if (!this.ocrPreviewData?.products?.length) {
+            this.showNotification('Aucun produit ? importer', 'info');
+            return;
+        }
+        const hotelId = this.hotelId || Number(localStorage.getItem('hotelId'));
+        if (!hotelId) {
+            this.showNotification('Aucun h?tel s?lectionn? pour l import OCR', 'error');
+            return;
+        }
+        try {
+            for (const product of this.ocrPreviewData.products) {
+                const payload = {
+                    name: product.name || 'Produit',
+                    price: typeof product.price === 'number' && !Number.isNaN(product.price) ? product.price : 0,
+                    category: (product.category || 'autres').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+                    description: 'Ajout? via OCR',
+                    available: true
+                };
+                await api.post(`/api/hotels/${hotelId}/menu`, payload);
+            }
+            this.showNotification('Produits import?s', 'success');
+            this.closeOcrPreviewModal();
+            this.loadMenu();
+        } catch (error) {
+            console.error('[OCR] import failed', error);
+            this.showNotification('Import impossible: ' + (error.message || ''), 'error');
+        }
+    }
+,
+
     async ensureHotelContext() {
         // If hotelId already set, keep it
         if (this.hotelId && this.hotelId !== 1) return;
+
+        const hasAuthHelper = typeof auth !== 'undefined' && typeof auth.isAuthenticated === 'function';
+        const isLoggedIn = hasAuthHelper && auth.isAuthenticated();
+        if (!isLoggedIn) {
+            // Avoid calling protected admin endpoints while on public/auth pages.
+            // They would respond with 401 and trigger an infinite redirect loop to /admin/login.html.
+            return;
+        }
+
         try {
             const hotels = await api.get('/api/hotels');
             if (hotels && hotels.length) {
@@ -51,6 +217,13 @@ const app = {
         const urlParams = new URLSearchParams(window.location.search);
         const queryMenu = urlParams.get('menu');
 
+        // Force onboarding page when directly on onboarding.html
+        if (path.includes('onboarding.html')) {
+            window.location.hash = '#onboarding';
+            this.loadOnboarding();
+            return;
+        }
+
         // Public menu (no auth)
         if (path.includes('/menu/') || queryMenu) {
             this.loadPublicMenu();
@@ -71,7 +244,6 @@ const app = {
         if (path.includes('/admin/')) {
             // When not authenticated, go to onboarding
         if (!auth.isAuthenticated()) {
-            try { localStorage.setItem('useMockBackend', 'true'); } catch {}
             window.location.hash = '#onboarding';
             this.loadOnboarding();
             return;
@@ -176,14 +348,19 @@ const app = {
 
     renderPublicMenu(hotel, menu, tableNumber) {
         const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+        const uniqueCategories = Array.from(new Set(menu.map(item => (item.category || 'Autres').trim())));
         const categories = [
-            'all',
-            ...Array.from(new Set(menu.map(item => (item.category || 'Autres').toLowerCase())))
+            { key: 'all', label: 'Tous' },
+            ...uniqueCategories.map(cat => ({
+                key: cat.toLowerCase(),
+                label: cat
+            }))
         ];
         this.publicMenuState = {
             items: menu,
             filter: 'all',
-            search: ''
+            search: '',
+            categories
         };
         
         document.getElementById('app').innerHTML = `
@@ -201,8 +378,8 @@ const app = {
                 <div class="menu-panel">
                     <div class="menu-tabs">
                         ${categories.map(cat => `
-                            <button class="menu-tab ${cat === 'all' ? 'active' : ''}" data-filter="${cat}">
-                                ${cat === 'all' ? 'Tous' : cat.replace(/_/g, ' ')}
+                            <button class="menu-tab ${cat.key === 'all' ? 'active' : ''}" data-filter="${cat.key}">
+                                ${cat.label.replace(/_/g, ' ')}
                             </button>
                         `).join('')}
                     </div>
@@ -258,7 +435,7 @@ const app = {
     renderPublicMenuItems() {
         const container = document.getElementById('menu-items-container');
         if (!container) return;
-        const { items, filter, search } = this.publicMenuState;
+        const { items, filter, search, categories = [] } = this.publicMenuState;
         const searchTerm = search.trim().toLowerCase();
 
         const filtered = items.filter(item => {
@@ -270,36 +447,64 @@ const app = {
         if (!filtered.length) {
             container.innerHTML = `
                 <div class="menu-empty">
-                    <p>Aucun article ne correspond Ã  votre recherche.</p>
+                    <p>Aucun article ne correspond à votre recherche.</p>
                 </div>
             `;
             return;
         }
 
-        container.innerHTML = filtered.map(item => `
-            <article class="menu-card ${!item.available ? 'menu-card--disabled' : ''}">
-                <div class="menu-card__media">
-                    <span>${(item.name || '?').charAt(0)}</span>
-                </div>
-                <div class="menu-card__info">
-                    <div class="menu-card__title-row">
-                        <div>
-                            <h3 class="menu-card__name">${item.name}</h3>
-                            <p class="menu-card__desc">${item.description || 'DÃ©couvrez une saveur artisanale.'}</p>
-                        </div>
-                        ${item.category ? `<span class="menu-card__chip">${item.category}</span>` : ''}
+        // Grouper par catégorie (ordre basé sur les onglets)
+        const grouped = filtered.reduce((acc, item) => {
+            const key = (item.category || 'Autres').toLowerCase();
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(item);
+            return acc;
+        }, {});
+
+        const visibleCategories = filter === 'all'
+            ? categories.filter(c => c.key !== 'all')
+            : categories.filter(c => c.key === filter);
+
+        const sectionsHtml = visibleCategories.map(cat => {
+            const itemsForCat = grouped[cat.key] || [];
+            if (!itemsForCat.length) return '';
+            return `
+                <section class="menu-category">
+                    <div class="menu-category__header">
+                        <h2 class="menu-category__title">${cat.label}</h2>
+                        <span class="menu-category__count">${itemsForCat.length} article(s)</span>
                     </div>
-                    <div class="menu-card__meta">
-                        <div class="menu-card__price">€${parseFloat(item.price).toFixed(2)}</div>
-                        ${item.available ? `
-                            <button class="menu-card__add" onclick="event.stopPropagation(); app.addToCart(${item.id}, '${(item.name || '').replace(/'/g, "\\'")}', ${item.price}, '${(item.description || '').replace(/'/g, "\\'")}')">
-                                +
-                            </button>
-                        ` : '<span class="menu-card__soldout">Indisponible</span>'}
+                    <div class="menu-category__grid">
+                        ${itemsForCat.map(item => `
+                            <article class="menu-card card-modern ${!item.available ? 'menu-card--disabled' : ''}">
+                                <div class="menu-card__media">
+                                    <span>${(item.name || '?').charAt(0)}</span>
+                                </div>
+                                <div class="menu-card__info">
+                                    <div class="menu-card__title-row">
+                                        <div>
+                                            <h3 class="menu-card__name">${item.name}</h3>
+                                            <p class="menu-card__desc">${item.description || 'Découvrez une saveur artisanale.'}</p>
+                                        </div>
+                                        ${item.category ? `<span class="menu-card__chip">${item.category}</span>` : ''}
+                                    </div>
+                                    <div class="menu-card__meta">
+                                        <div class="menu-card__price">€${parseFloat(item.price).toFixed(2)}</div>
+                                        ${item.available ? `
+                                            <button class="menu-card__add" onclick="event.stopPropagation(); app.addToCart(${item.id}, '${(item.name || '').replace(/'/g, "\\'")}', ${item.price}, '${(item.description || '').replace(/'/g, "\\'")}')">
+                                                +
+                                            </button>
+                                        ` : '<span class="menu-card__soldout">Indisponible</span>'}
+                                    </div>
+                                </div>
+                            </article>
+                        `).join('')}
                     </div>
-                </div>
-            </article>
-        `).join('');
+                </section>
+            `;
+        }).join('');
+
+        container.innerHTML = sectionsHtml;
     },
     addToCart(itemId, name, price, description) {
         let cart = JSON.parse(localStorage.getItem('cart') || '[]');
@@ -458,42 +663,29 @@ const app = {
             return;
         }
         container.innerHTML = `
-            <div class="auth-page auth-page--hero">
-                <div class="auth-visual auth-visual--full" style="background-image: url('/img/backlog.jpg');">
-                    <div class="auth-visual__overlay"></div>
-                    <div class="auth-visual__content">
-                        <p class="auth-eyebrow">QR Coffee</p>
-                        <h1>Rejoignez votre espace barista</h1>
-                        <p>GÃ©rez vos tables, vos commandes et votre menu depuis un seul tableau de bord.</p>
-                        <div class="auth-highlights">
-                            <span>âš¡ Commandes en temps rÃ©el</span>
-                            <span>ðŸ“± QR Codes intelligents</span>
-                            <span>ðŸ‘¥ Multi-hÃ´tels</span>
-                        </div>
-                    </div>
-                </div>
+            <div class="auth-page auth-page--solo">
                 <div class="auth-card auth-card--floating">
                     <div class="auth-card__header">
-                        <pa class="auth-card__eyebrow">Tableau de bord</p>
+                        <p class="auth-card__eyebrow">Tableau de bord</p>
                         <h2>Connexion Admin</h2>
-                        <p class="auth-card__subtitle">Renseignez vos accÃ¨s pour continuer</p>
+                        <p class="auth-card__subtitle">Renseignez vos accès pour continuer</p>
                     </div>
                     <form id="login-form" class="auth-form" onsubmit="app.handleLogin(event)">
                         <label class="auth-label">Email</label>
                         <div class="auth-input">
-                            <span>ðŸ“§</span>
+                            <span>📧</span>
                             <input type="email" name="email" value="admin@example.com" required>
                         </div>
                         <label class="auth-label">Mot de passe</label>
                         <div class="auth-input">
-                            <span>ðŸ”’</span>
+                            <span>🔒</span>
                             <input type="password" name="password" required>
                         </div>
                         <button type="submit" class="auth-submit">Se connecter</button>
-                        <p class="auth-demo">DÃ©mo : admin@example.com / password</p>
+                        <p class="auth-demo">Démo : admin@example.com / password</p>
                         <p class="auth-footer">
                             Pas encore de compte ?
-                            <a href="/admin/register.html">CrÃ©er un compte</a>
+                            <a href="/admin/register.html">Créer un compte</a>
                         </p>
                     </form>
                 </div>
@@ -508,7 +700,7 @@ const app = {
         }
         container.innerHTML = `
             <div class="auth-page auth-page--hero">
-                <div class="auth-visual auth-visual--full" style="background-image: url('/img/backlog.jpg');">
+                <div class="auth-visual auth-visual--full" style="background-image: url('/img/oo.jpg');">
                     <div class="auth-visual__overlay"></div>
                     <div class="auth-visual__content">
                         <p class="auth-eyebrow">QR Coffee</p>
@@ -584,31 +776,14 @@ const app = {
             this.showNotification('Compte créé avec succès !', 'success');
             if (reg && reg.token) auth.setToken(reg.token);
 
-            try {
-                const onboard = await api.post('/api/hotels/onboarding', {
-                    businessName,
-                    location: '',
-                    businessPhone: '',
-                    personalPhone: '',
-                    tablesCount: 5
-                });
-                if (onboard?.id) {
-                    this.hotelId = onboard.id;
-                    localStorage.setItem('hotelId', String(onboard.id));
-                }
-                if (onboard?.slug) {
-                    localStorage.setItem('mockHotelSlug', onboard.slug);
-                }
+            if (businessName) {
                 localStorage.setItem('mockBusinessName', businessName);
-                this.showNotification('Business créé', 'success');
-            } catch (err) {
-                this.showNotification('Compte créé, mais erreur onboarding: ' + (err.message || 'échec'), 'error');
+                localStorage.setItem('pendingBusinessName', businessName);
             }
 
             setTimeout(() => {
-                window.location.hash = '#dashboard';
-                this.router();
-            }, 500);
+                window.location.href = '/admin/onboarding.html';
+            }, 400);
         } catch (error) {
             this.showNotification('Erreur lors de la création: ' + error.message, 'error');
         }
@@ -686,7 +861,7 @@ const app = {
         const form = e.target;
         const formData = new FormData(form);
         const payload = {
-            businessName: formData.get('businessName') || '',
+            businessName: formData.get('businessName') || localStorage.getItem('pendingBusinessName') || '',
             location: formData.get('location') || '',
             businessPhone: formData.get('businessPhone') || '',
             personalPhone: formData.get('personalPhone') || '',
@@ -714,9 +889,9 @@ const app = {
             if (payload.businessName) {
                 localStorage.setItem('mockBusinessName', payload.businessName);
             }
-            this.showNotification('Business créé', 'success');
-            window.location.hash = '#dashboard';
-            this.router();
+            localStorage.removeItem('pendingBusinessName');
+            this.showNotification('Business cr??', 'success');
+            window.location.href = '/admin/#dashboard';
         } catch (err) {
             this.showNotification('Erreur onboarding: ' + (err.message || 'échec'), 'error');
         }
@@ -775,28 +950,41 @@ const app = {
 
             const activeTables = tablesWithOrders.filter(t => t.status !== 'idle').length;
             const unreadOrders = tablesWithOrders.reduce((sum, t) => sum + (t.unreadOrders || 0), 0);
+            const newOrdersCount = orders.filter(o => o.status === 'new').length;
+            const now = Date.now();
+            const waitMinutes = orders
+                .filter(o => o.status === 'new' || o.status === 'preparing')
+                .map(o => (now - new Date(o.createdAt || now).getTime()) / 60000)
+                .filter(v => v >= 0);
+            const avgWait = waitMinutes.length ? waitMinutes.reduce((a, b) => a + b, 0) / waitMinutes.length : 0;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const clientsToday = orders.filter(o => {
+                const d = o.createdAt ? new Date(o.createdAt) : null;
+                return d && d >= today;
+            }).length;
 
             this.renderAdminLayout('Dashboard', `
-                <div class="page-header">
+                <div class="page-header hero-modern">
                     <h1 class="page-title">Dashboard — ${hotel.name}</h1>
                 </div>
                 
                 <div class="grid grid-4 mb-lg">
                     <div class="card">
                         <h3 style="color: var(--text-light); margin-bottom: 0.5rem;">Tables Actives</h3>
-                        <div style="font-size: 2rem; font-weight: 700; color: var(--primary);">${activeTables}/${tables.length}</div>
+                        <div style="font-size: 2rem; font-weight: 700; color: var(--primary);">${activeTables}/${tables.length || 0}</div>
                     </div>
                     <div class="card">
                         <h3 style="color: var(--text-light); margin-bottom: 0.5rem;">Nouvelles Commandes</h3>
-                        <div style="font-size: 2rem; font-weight: 700; color: var(--error);">${unreadOrders}</div>
+                        <div style="font-size: 2rem; font-weight: 700; color: var(--error);">${newOrdersCount}</div>
                     </div>
                     <div class="card">
                         <h3 style="color: var(--text-light); margin-bottom: 0.5rem;">Temps d'attente</h3>
-                        <div style="font-size: 2rem; font-weight: 700; color: var(--warning);">12min</div>
+                        <div style="font-size: 2rem; font-weight: 700; color: var(--warning);">${avgWait.toFixed(0)}min</div>
                     </div>
                     <div class="card">
                         <h3 style="color: var(--text-light); margin-bottom: 0.5rem;">Clients Aujourd'hui</h3>
-                        <div style="font-size: 2rem; font-weight: 700; color: var(--success);">24</div>
+                        <div style="font-size: 2rem; font-weight: 700; color: var(--success);">${clientsToday}</div>
                     </div>
                 </div>
                 
@@ -806,7 +994,7 @@ const app = {
                     </div>
                     <div class="grid grid-4" id="tables-grid">
                         ${tablesWithOrders.map(table => `
-                            <div class="card dashboard-table-card ${table.unreadOrders > 0 ? 'has-new-orders' : ''}" 
+                            <div class="card card-modern dashboard-table-card ${table.unreadOrders > 0 ? 'has-new-orders' : ''}" 
                                  style="text-align: center; cursor: pointer; transition: all 0.3s ease; ${table.status === 'new' ? 'border: 2px solid var(--info);' : ''}"
                                  onclick="app.showTableOrders(${table.id}, ${table.number}, ${table.unreadOrders || 0})">
                                 <h3 style="margin-bottom: 0.5rem;">Table ${table.number}</h3>
@@ -871,7 +1059,7 @@ const app = {
             const modal = document.createElement('div');
             modal.className = 'modal-overlay table-orders-modal';
             modal.innerHTML = `
-                <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal glass-panel" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
                     <div class="modal-header" style="background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white;">
                         <h2 class="modal-title" style="color: white;">
                             Table ${tableNumber}
@@ -881,7 +1069,7 @@ const app = {
                     </div>
                     <div class="modal-body" style="padding: var(--spacing-lg);">
                         ${tableOrders.map(order => `
-                            <div class="order-card" style="margin-bottom: var(--spacing-md); padding: var(--spacing-md); border: 2px solid var(--border); border-radius: var(--radius-md); background: var(--surface);">
+                            <div class="order-card card-modern" style="margin-bottom: var(--spacing-md); padding: var(--spacing-md); border: 2px solid var(--border); border-radius: var(--radius-md); background: var(--surface);">
                                 <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: var(--spacing-md);">
                                     <div>
                                         <h3 style="margin: 0 0 0.5rem 0; color: var(--text); font-size: 1.25rem;">Commande #${order.id}</h3>
@@ -940,18 +1128,18 @@ const app = {
                                 
                                 <div style="display: flex; gap: var(--spacing-sm); justify-content: flex-end; margin-top: var(--spacing-md); padding-top: var(--spacing-md); border-top: 2px solid var(--border);">
                                     ${order.status === 'new' ? `
-                                        <button class="btn btn-success" onclick="app.confirmOrder(${order.id}, ${tableId}, ${tableNumber})">
+                                        <button class="btn btn-success btn-modern" onclick="app.confirmOrder(${order.id}, ${tableId}, ${tableNumber})">
                                             âœ“ Confirmer la commande
                                         </button>
-                                        <button class="btn btn-primary" onclick="app.updateOrderStatus(${order.id}, 'preparing'); this.closest('.table-orders-modal').remove(); setTimeout(() => app.loadDashboard(), 500);">
+                                        <button class="btn btn-primary btn-modern" onclick="app.updateOrderStatus(${order.id}, 'preparing')">
                                             Commencer la prÃ©paration
                                         </button>
                                     ` : order.status === 'preparing' ? `
-                                        <button class="btn btn-success" onclick="app.updateOrderStatus(${order.id}, 'served'); this.closest('.table-orders-modal').remove(); setTimeout(() => app.loadDashboard(), 500);">
+                                        <button class="btn btn-success btn-modern" onclick="app.updateOrderStatus(${order.id}, 'served')">
                                             âœ“ Marquer comme servi
                                         </button>
                                     ` : ''}
-                                    <button class="btn btn-outline" onclick="app.updateOrderStatus(${order.id}, 'cancelled'); this.closest('.order-card').style.opacity='0.5';">
+                                    <button class="btn btn-outline btn-modern" onclick="app.updateOrderStatus(${order.id}, 'cancelled'); this.closest('.order-card').style.opacity='0.5';">
                                         Annuler
                                     </button>
                                 </div>
@@ -980,8 +1168,7 @@ const app = {
             await api.put(`/api/hotels/orders/${orderId}/status`, { status: 'preparing' });
             this.showNotification(`Commande #${orderId} confirmÃ©e - Table ${tableNumber}`, 'success');
             
-            // Fermer le modal et recharger le dashboard
-            document.querySelector('.table-orders-modal')?.remove();
+            // Rafraîchir la liste sans quitter le modal
             this.loadOrders();
         } catch (error) {
             this.showNotification('Erreur: ' + error.message, 'error');
@@ -993,10 +1180,10 @@ const app = {
         document.getElementById('app').innerHTML = `
             <div class="admin-layout">
                 <div class="admin-header">
-                    <div class="navbar">
+                    <div class="navbar nav-modern">
                         <div class="navbar-content container">
                             <a href="#dashboard" class="navbar-brand">QR Coffee</a>
-                            <nav>
+                            <nav class="nav-modern">
                                 <ul class="navbar-nav">
                                     <li><a href="#dashboard" class="navbar-link ${currentHash === '#dashboard' ? 'active' : ''}" data-nav="dashboard">Dashboard</a></li>
                                     <li><a href="#tables" class="navbar-link ${currentHash === '#tables' ? 'active' : ''}" data-nav="tables">Tables</a></li>
@@ -1026,11 +1213,11 @@ const app = {
             const tables = await api.get(`/api/hotels/${this.hotelId}/tables`);
             
             this.renderAdminLayout('Tables', `
-                <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="page-header hero-modern" style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <h1 class="page-title">Tables</h1>
                     </div>
-                    <button class="btn btn-primary" onclick="app.showAddTableModal()">Ajouter une table</button>
+                    <button class="btn btn-primary" onclick="app.showAddTableModall()">Ajouter une table</button>
                 </div>
                 
 
@@ -1097,7 +1284,7 @@ const app = {
             const hasSelection = this.selectedOrders.size > 0;
             
             this.renderAdminLayout('Commandes', `
-                <div class="page-header">
+                <div class="page-header hero-modern">
                     <h1 class="page-title">Commandes</h1>
                 </div>
                 
@@ -1130,6 +1317,8 @@ const app = {
                                 <th>Items</th>
                                 <th>Total</th>
                                 <th>Statut</th>
+                                <th>Mois</th>
+                                <th>Année</th>
                                 <th>Heure</th>
                                 <th>Actions</th>
                             </tr>
@@ -1178,6 +1367,9 @@ const app = {
             const matchesStatus = status === 'all' || order.status === status;
             const items = order.items || [];
             const tableNumber = order.tableNumber || '';
+            const createdAt = order.createdAt ? new Date(order.createdAt) : null;
+            const month = createdAt ? (createdAt.getMonth() + 1).toString().padStart(2, '0') : '';
+            const year = createdAt ? createdAt.getFullYear().toString() : '';
             const blobParts = [
                 `${order.id}`,
                 order.status || '',
@@ -1187,6 +1379,8 @@ const app = {
                 `table #${tableNumber}`,
                 parseFloat(order.total || 0).toFixed(2),
                 (order.customerInfo && order.customerInfo.note) || '',
+                month,
+                year,
                 ...items.map((it) => it.name || ''),
             ];
             const blob = blobParts.join(' ').toLowerCase().replace(/\s+/g, '');
@@ -1248,6 +1442,9 @@ const app = {
 
     renderOrderRow(order) {
         const checked = this.selectedOrders && this.selectedOrders.has(order.id);
+        const createdAt = order.createdAt ? new Date(order.createdAt) : null;
+        const monthText = createdAt ? createdAt.toLocaleString('fr-FR', { month: 'long' }) : '';
+        const yearText = createdAt ? createdAt.getFullYear() : '';
         return `
             <tr id="order-row-${order.id}" class="${checked ? 'selected-order-row' : ''}">
                 <td>
@@ -1258,6 +1455,8 @@ const app = {
                 <td>${(order.items || []).length} items</td>
                 <td>€${parseFloat(order.total).toFixed(2)}</td>
                 <td><span class="badge badge-${this.getOrderStatusColor(order.status)}">${order.status}</span></td>
+                <td>${monthText}</td>
+                <td>${yearText}</td>
                 <td>${order.createdAt ? new Date(order.createdAt).toLocaleTimeString() : ''}</td>
                 <td class="orders-row-actions">
                     <button type="button" class="btn btn-sm btn-primary" onclick="app.viewOrderDetails(${order.id})">Détails</button>
@@ -1267,6 +1466,37 @@ const app = {
                 </td>
             </tr>
         `;
+    },
+
+    async exportOrdersCsv() {
+        try {
+            const orders = this.normalizeOrders(await api.get(`/api/hotels/${this.hotelId}/orders`));
+            const headers = ['id', 'tableNumber', 'status', 'total', 'items', 'createdAt'];
+            const rows = orders.map((o) => {
+                const itemsStr = (o.items || [])
+                    .map((it) => `${it.name || ''} x${it.qty || it.quantity || 1} @ ${it.price || 0}`)
+                    .join(' | ');
+                return [
+                    o.id,
+                    o.tableNumber || '',
+                    o.status || '',
+                    parseFloat(o.total || 0).toFixed(2),
+                    itemsStr,
+                    o.createdAt || ''
+                ];
+            });
+            const csv = [headers.join(','), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `orders-hotel-${this.hotelId}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+            this.showNotification('CSV exporté', 'success');
+        } catch (err) {
+            this.showNotification('Erreur export CSV: ' + (err.message || 'échec'), 'error');
+        }
     },
 
     updateOrdersSelectionUI() {
@@ -1328,13 +1558,33 @@ const app = {
         
         try {
             const items = await api.get(`/api/hotels/${this.hotelId}/menu`);
+            const detectedCategories = Array.from(new Set(items.map(i => (i.category || '').trim()).filter(Boolean)));
+            this.customCategories = this.getCustomCategories();
+            const allCategories = Array.from(new Set([...detectedCategories, ...this.customCategories]));
             
             this.renderAdminLayout('Menu', `
-                <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="page-header hero-modern menu-header-inline">
                     <div>
                         <h1 class="page-title">Menu</h1>
                     </div>
-                    <button class="btn btn-primary" onclick="app.showAddMenuItemModal()">Ajouter un item</button>
+                    <div class="menu-admin-actions">
+                        <button class="btn btn-outline" id="ocr-upload-btn" onclick="app.triggerOcrUpload()">Importer un menu (OCR)</button>
+                        <button class="btn btn-primary" onclick="app.showAddMenuItemModall()">Ajouter un item</button>
+                        <input type="file" id="menu-ocr-input" accept="image/*" multiple style="display: none;" onchange="app.handleOcrFileChange(event)">
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom: 1.5rem;">
+                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                        <div>
+                            <label class="form-label" for="new-category-name">Ajouter une catégorie</label>
+                            <input type="text" id="new-category-name" class="form-input" placeholder="Ex: Boissons, Desserts">
+                        </div>
+                        <button class="btn btn-outline" onclick="app.handleAddCategory()">Ajouter</button>
+                        <div class="badge-list" style="display:flex; gap:0.5rem; flex-wrap: wrap;">
+                            ${allCategories.map(cat => `<span class="badge badge-primary">${cat}</span>`).join('')}
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="grid grid-3" id="menu-grid">
@@ -1362,20 +1612,156 @@ const app = {
                 </div>
             `);
         } catch (error) {
-            document.getElementById('app').innerHTML = `<div class="container"><p>Erreur: ${error.message}</p></div>`;
+            console.error('Error loading menu:', error);
+            const message = error && error.message ? error.message : '';
+            if ((message && message.toLowerCase().includes('hotel not found')) || (error && error.status === 404)) {
+                try {
+                    const hotels = await api.get('/api/hotels');
+                    if (hotels && hotels.length) {
+                        const newHotelId = hotels[0].id;
+                        if (newHotelId !== this.hotelId) {
+                            this.hotelId = newHotelId;
+                            localStorage.setItem('hotelId', String(newHotelId));
+                            return this.loadMenu();
+                        }
+                    }
+                } catch (ctxErr) {
+                    console.warn('Failed to refresh hotel context', ctxErr);
+                }
+            }
+            document.getElementById('app').innerHTML = `<div class="container"><p>Erreur: ${message || 'Impossible de charger le menu'}</p></div>`;
         }
     },
 
     async loadProfile() {
-        this.renderAdminLayout('Profil', `
-            <div class="page-header">
-                <h1 class="page-title">Profil</h1>
-            </div>
-            
-            <div class="card">
-                <p>Gestion du profil utilisateur</p>
-            </div>
-        `);
+        document.getElementById('app').innerHTML = this.showLoading();
+
+        try {
+            const [hotel, tables, ordersRaw] = await Promise.all([
+                api.get(`/api/hotels/${this.hotelId}`),
+                api.get(`/api/hotels/${this.hotelId}/tables`),
+                api.get(`/api/hotels/${this.hotelId}/orders`)
+            ]);
+            const orders = this.normalizeOrders(ordersRaw);
+            const totalRevenue = orders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
+            const newOrders = orders.filter(o => o.status === 'new').length;
+            const activeTables = tables.filter(t => (t.unreadOrders || 0) > 0 || t.status === 'new').length;
+
+            const profileData = {
+                name: localStorage.getItem('userName') || hotel.ownerName || '',
+                email: localStorage.getItem('userEmail') || hotel.ownerEmail || '',
+                businessName: localStorage.getItem('mockBusinessName') || hotel.name || '',
+                location: localStorage.getItem('mockBusinessLocation') || hotel.location || hotel.address || '',
+                businessPhone: localStorage.getItem('mockBusinessPhone') || hotel.businessPhone || '',
+                personalPhone: localStorage.getItem('mockPersonalPhone') || hotel.personalPhone || '',
+            };
+
+            this.renderAdminLayout('Profil', `
+                <div class="page-header hero-modern">
+                    <div>
+                        <h1 class="page-title">Profil & Statistiques</h1>
+                        <p class="text-muted">Vos informations personnelles et les indicateurs clés de votre établissement.</p>
+                    </div>
+                    <div class="orders-actions">
+                        <button class="btn btn-outline" onclick="app.exportOrdersCsv()">Exporter commandes (CSV)</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-4 mb-lg">
+                    <div class="card stat-card">
+                        <p class="stat-label">Commandes totales</p>
+                        <h3 class="stat-value">${orders.length}</h3>
+                    </div>
+                    <div class="card stat-card">
+                        <p class="stat-label">Nouvelles commandes</p>
+                        <h3 class="stat-value">${newOrders}</h3>
+                    </div>
+                    <div class="card stat-card">
+                        <p class="stat-label">Tables actives</p>
+                        <h3 class="stat-value">${activeTables}</h3>
+                    </div>
+                    <div class="card stat-card">
+                        <p class="stat-label">Revenus estimés</p>
+                        <h3 class="stat-value">€${totalRevenue.toFixed(2)}</h3>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2 class="section-title">Informations personnelles & business</h2>
+                    <form id="profile-form" class="grid grid-2" onsubmit="app.handleSaveProfile(event)">
+                        <div class="form-group">
+                            <label class="form-label">Nom</label>
+                            <input type="text" name="name" class="form-input" value="${profileData.name}" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Email</label>
+                            <input type="email" name="email" class="form-input" value="${profileData.email}" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Business name</label>
+                            <input type="text" name="businessName" class="form-input" value="${profileData.businessName}" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Adresse / Localisation</label>
+                            <input type="text" name="location" class="form-input" value="${profileData.location}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Téléphone business</label>
+                            <input type="text" name="businessPhone" class="form-input" value="${profileData.businessPhone}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Téléphone personnel</label>
+                            <input type="text" name="personalPhone" class="form-input" value="${profileData.personalPhone}">
+                        </div>
+                        <div class="form-actions" style="grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.5rem;">
+                            <button type="reset" class="btn btn-outline">Réinitialiser</button>
+                            <button type="submit" class="btn btn-primary">Enregistrer</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        } catch (error) {
+            document.getElementById('app').innerHTML = `<div class="container"><p>Erreur: ${error.message}</p></div>`;
+        }
+    },
+
+    async handleSaveProfile(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const payload = {
+            name: formData.get('name')?.toString() || '',
+            email: formData.get('email')?.toString() || '',
+            businessName: formData.get('businessName')?.toString() || '',
+            location: formData.get('location')?.toString() || '',
+            businessPhone: formData.get('businessPhone')?.toString() || '',
+            personalPhone: formData.get('personalPhone')?.toString() || '',
+        };
+
+        try {
+            // Persistance locale (mock ou fallback quand l'API n'existe pas)
+            localStorage.setItem('userName', payload.name);
+            localStorage.setItem('userEmail', payload.email);
+            localStorage.setItem('mockBusinessName', payload.businessName);
+            if (payload.location) localStorage.setItem('mockBusinessLocation', payload.location);
+            if (payload.businessPhone) localStorage.setItem('mockBusinessPhone', payload.businessPhone);
+            if (payload.personalPhone) localStorage.setItem('mockPersonalPhone', payload.personalPhone);
+
+            // Adapter le mock pour refléter le business courant
+            if (typeof window.setMockBusinessProfile === 'function') {
+                window.setMockBusinessProfile({
+                    name: payload.businessName,
+                    slug: (payload.businessName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+                    location: payload.location,
+                    businessPhone: payload.businessPhone,
+                    personalPhone: payload.personalPhone
+                });
+            }
+
+            this.showNotification('Profil mis à jour (stocké localement)', 'success');
+            this.loadProfile();
+        } catch (err) {
+            this.showNotification('Erreur enregistrement: ' + (err.message || 'échec'), 'error');
+        }
     },
 
     // Order management methods
@@ -1391,9 +1777,9 @@ const app = {
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
             modal.innerHTML = `
-                <div class="modal" style="max-width: 600px;">
+                <div class="modal glass-panel" style="max-width: 600px;">
                     <div class="modal-header">
-                        <h2 class="modal-title">DÃ©tails de la commande #${order.id}</h2>
+                        <h2 class="modal-title">Détails de la commande #${order.id}</h2>
                         <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
                     </div>
                     <div class="modal-body">
@@ -1406,7 +1792,7 @@ const app = {
                             <thead>
                                 <tr>
                                     <th>Item</th>
-                                    <th>QuantitÃ©</th>
+                                    <th>Quantité</th>
                                     <th>Prix unitaire</th>
                                     <th>Total</th>
                                 </tr>
@@ -1472,19 +1858,19 @@ const app = {
             const response = await api.get(`/api/hotels/tables/${this.hotelId}/${tableId}/qrcode`);
             const qrSrc = response.qrPath || response.url || response.qrUrl || '';
             const targetUrl = response.qrUrl || response.menuUrl || response.url || '';
-            this.showQRCodeModal(qrSrc, targetUrl);
+            this.showQRCodeModall(qrSrc, targetUrl);
         } catch (error) {
             this.showNotification('Erreur: ' + error.message, 'error');
         }
     },
 
-    showQRCodeModal(imagePath, targetUrl) {
+    showQRCodeModall(imagePath, targetUrl) {
         const menuUrl = targetUrl || '';
         const qrImgSrc = imagePath ? this.resolveQrAsset(imagePath) : this.buildQrFromUrl(menuUrl);
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.innerHTML = `
-            <div class="modal">
+            <div class="modal glass-panel">
                 <div class="modal-header">
                     <h2 class="modal-title">QR Code</h2>
                     <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
@@ -1538,20 +1924,20 @@ const app = {
         }
     },
 
-    showAddTableModal() {
-        this.showTableModal(null, null, null);
+    showAddTableModall() {
+        this.showTableModall(null, null, null);
     },
 
     editTable(tableId, number, status) {
-        this.showTableModal(tableId, number, status);
+        this.showTableModall(tableId, number, status);
     },
 
-    showTableModal(tableId, number, status) {
+    showTableModall(tableId, number, status) {
         const isEdit = !!tableId;
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.innerHTML = `
-            <div class="modal">
+            <div class="modal glass-panel">
                 <div class="modal-header">
                     <h2 class="modal-title">${isEdit ? 'Modifier' : 'Ajouter'} une table</h2>
                     <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
@@ -1605,20 +1991,62 @@ const app = {
         }
     },
 
-    showAddMenuItemModal() {
-        this.showMenuItemModal(null, '', '', 'Coffee', '', true);
+    getCustomCategories() {
+        try {
+            const raw = localStorage.getItem('customMenuCategories');
+            if (!raw) return [];
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+        } catch {
+            return [];
+        }
+    },
+
+    saveCustomCategories(list) {
+        try {
+            localStorage.setItem('customMenuCategories', JSON.stringify(list || []));
+        } catch {}
+    },
+
+    handleAddCategory() {
+        const input = document.getElementById('new-category-name');
+        if (!input) return;
+        const value = (input.value || '').trim();
+        if (!value) {
+            this.showNotification('Nom de catégorie vide', 'error');
+            return;
+        }
+        const current = this.getCustomCategories();
+        if (current.includes(value)) {
+            this.showNotification('Cette catégorie existe déjà', 'info');
+            return;
+        }
+        current.push(value);
+        this.saveCustomCategories(current);
+        this.showNotification('Catégorie ajoutée', 'success');
+        input.value = '';
+        // Rafraîchir la page menu pour mettre à jour la liste affichée
+        this.loadMenu();
+    },
+
+    showAddMenuItemModall() {
+        this.showMenuItemModall(null, '', '', 'Coffee', '', true);
     },
 
     editMenuItem(itemId, name, price, category, description, available) {
-        this.showMenuItemModal(itemId, name, price, category, description, available);
+        this.showMenuItemModall(itemId, name, price, category, description, available);
     },
 
-    showMenuItemModal(itemId, name, price, category, description, available) {
+    showMenuItemModall(itemId, name, price, category, description, available) {
         const isEdit = !!itemId;
+        const existingCategories = Array.from(new Set([
+            'Coffee', 'Bakery', 'Drinks', 'Desserts', 'Main', 'Appetizer',
+            ...(this.getCustomCategories() || [])
+        ]));
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.innerHTML = `
-            <div class="modal">
+            <div class="modal glass-panel">
                 <div class="modal-header">
                     <h2 class="modal-title">${isEdit ? 'Modifier' : 'Ajouter'} un item du menu</h2>
                     <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
@@ -1634,14 +2062,11 @@ const app = {
                             <input type="number" class="form-input" name="price" value="${price || ''}" step="0.01" min="0" required>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">CatÃ©gorie</label>
+                            <label class="form-label">Catégorie</label>
                             <select class="form-select" name="category">
-                                <option value="Coffee" ${category === 'Coffee' ? 'selected' : ''}>Coffee</option>
-                                <option value="Bakery" ${category === 'Bakery' ? 'selected' : ''}>Bakery</option>
-                                <option value="Drinks" ${category === 'Drinks' ? 'selected' : ''}>Drinks</option>
-                                <option value="Desserts" ${category === 'Desserts' ? 'selected' : ''}>Desserts</option>
-                                <option value="Main" ${category === 'Main' ? 'selected' : ''}>Main</option>
-                                <option value="Appetizer" ${category === 'Appetizer' ? 'selected' : ''}>Appetizer</option>
+                                ${existingCategories.map(cat => `
+                                    <option value="${cat}" ${category === cat ? 'selected' : ''}>${cat}</option>
+                                `).join('')}
                             </select>
                         </div>
                         <div class="form-group">

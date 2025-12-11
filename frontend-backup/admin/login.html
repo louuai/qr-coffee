@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
@@ -8,44 +8,52 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+      .auth-page--solo {
+        background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.08), transparent 35%), var(--background);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: clamp(24px, 6vw, 64px);
+      }
+      .auth-card--floating {
+        position: relative;
+        top: auto;
+        left: auto;
+        transform: none;
+        max-height: none;
+        overflow: visible;
+        box-shadow: 0 24px 80px rgba(0,0,0,0.28);
+      }
+      body { background: #0e0a07; }
+      .auth-card__subtitle { color: var(--text-light); }
+    </style>
 </head>
 <body>
-    <div class="auth-page auth-page--hero">
-        <div class="auth-visual auth-visual--full" style="background-image: url('../img/backlog.jpg');">
-            <div class="auth-visual__overlay"></div>
-            <div class="auth-visual__content">
-                <p class="auth-eyebrow">QR Coffee</p>
-                <h1>Rejoignez votre espace barista</h1>
-                <p>GÃ©rez vos tables, vos commandes et votre menu depuis un seul tableau de bord.</p>
-                <div class="auth-highlights">
-                    <span>âš¡ Commandes en temps rÃ©el</span>
-                    <span>ðŸ“± QR Codes intelligents</span>
-                    <span>ðŸ‘¥ Multi-hÃ´tels</span>
-                </div>
-            </div>
-        </div>
+    <div class="auth-page auth-page--solo">
         <div class="auth-card auth-card--floating">
             <div class="auth-card__header">
                 <p class="auth-card__eyebrow">Tableau de bord</p>
                 <h2>Connexion Admin</h2>
-                <p class="auth-card__subtitle">Renseignez vos accÃ¨s pour continuer</p>
+                <p class="auth-card__subtitle">Renseignez vos accès pour continuer</p>
             </div>
             <form id="login-form" class="auth-form">
                 <label class="auth-label">Email</label>
                 <div class="auth-input">
-                    <span>ðŸ“§</span>
-                    <input type="email" name="email" required>
+                    <span>📧</span>
+                    <input type="email" name="email" placeholder="vous@example.com" required>
                 </div>
                 <label class="auth-label">Mot de passe</label>
                 <div class="auth-input">
-                    <span>ðŸ”’</span>
-                    <input type="password" name="password" required>
+                    <span>🔒</span>
+                    <input type="password" name="password" placeholder="••••••••" required>
                 </div>
                 <button type="submit" class="auth-submit">Se connecter</button>
-                <p class="auth-demo">DÃ©mo : admin@example.com / password</p>
+                <p class="auth-demo">Démo : admin@example.com / password</p>
                 <p class="auth-footer">
                     Pas encore de compte ?
-                    <a href="/admin/register.html">CrÃ©er un compte</a>
+                    <a href="/admin/register.html">Créer un compte</a>
                 </p>
             </form>
         </div>
@@ -58,5 +66,3 @@
     </script>
 </body>
 </html>
-
-

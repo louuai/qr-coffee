@@ -2,18 +2,23 @@ import { Sequelize, DataTypes, Model } from 'sequelize';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const dbHost = process.env.DB_HOST || 'localhost';
 const dbPort = Number(process.env.DB_PORT || 3306);
 const dbUser = process.env.DB_USER || 'root';
-const dbPass = process.env.DB_PASS || '';  // Changed default from 'secret' to ''
+const dbPass = process.env.DB_PASS || '';
 const dbName = process.env.DB_NAME || 'rasops_qr';
 
-export const sequelize = new Sequelize(dbName, dbUser, dbPass, {
-  host: dbHost,
-  port: dbPort,
-  dialect: 'mysql',
-  logging: false,
-});
+function buildSequelize(host: string) {
+  return new Sequelize(dbName, dbUser, dbPass, {
+    host,
+    port: dbPort,
+    dialect: 'mysql',
+    logging: false,
+  });
+}
+
+let sequelize = buildSequelize(process.env.DB_HOST || 'localhost');
+
+export { sequelize };
 
 export class Hotel extends Model {}
 export class Table extends Model {}
@@ -21,7 +26,44 @@ export class MenuItem extends Model {}
 export class Order extends Model {}
 export class User extends Model {}
 
+async function ensureHotelColumn(column: string, definition: string) {
+  try {
+    const [results] = await sequelize.query(`SHOW COLUMNS FROM \`hotels\` LIKE :column`, {
+      replacements: { column },
+    });
+    const columnExists = Array.isArray(results) && results.length > 0;
+    if (!columnExists) {
+      await sequelize.query(`ALTER TABLE \`hotels\` ADD COLUMN \`${column}\` ${definition}`);
+      console.log(`Column '${column}' added to hotels table`);
+    }
+  } catch (error) {
+    console.warn(`Unable to ensure column '${column}' on hotels table`, error);
+  }
+}
+
 export async function initDb() {
+  try {
+    await sequelize.authenticate();
+    console.log(`DB connected on host ${sequelize.config.host}:${dbPort} as ${dbUser}`);
+  } catch (err) {
+    console.error('Database connection error:', err);
+    // Fallback: if host was "db", retry on localhost once
+    const currentHost = sequelize.config.host;
+    if (currentHost === 'db') {
+      console.warn('Retrying DB connection on localhost as fallback...');
+      sequelize = buildSequelize('localhost');
+      try {
+        await sequelize.authenticate();
+        console.log(`DB connected on host localhost:${dbPort} as ${dbUser}`);
+      } catch (err2) {
+        console.error('Database fallback connection error:', err2);
+        throw err2;
+      }
+    } else {
+      throw err;
+    }
+  }
+
   Hotel.init(
     {
       name: { type: DataTypes.STRING, allowNull: false },
@@ -101,6 +143,11 @@ export async function initDb() {
 
   (User as any).hasMany(Hotel, { foreignKey: 'ownerId', as: 'hotels' });
   (Hotel as any).belongsTo(User, { foreignKey: 'ownerId', as: 'owner' });
+
+  await ensureHotelColumn('ownerId', 'INT NULL');
+  await ensureHotelColumn('location', 'VARCHAR(255) NULL');
+  await ensureHotelColumn('businessPhone', 'VARCHAR(255) NULL');
+  await ensureHotelColumn('personalPhone', 'VARCHAR(255) NULL');
 
   try {
     await sequelize.sync({ alter: true });

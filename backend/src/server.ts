@@ -9,6 +9,7 @@ import { initDb } from './models';
 import authRoutes from './routes/auth';
 import hotelsRoutes from './routes/hotels';
 import publicRoutes from './routes/public';
+import menuOcrRoutes from '../menu-ocr/menu-ocr.routes';
 
 // Suppress the DEP0066 deprecation warning for OutgoingMessage._headers
 // This is a known issue with Node.js 18.x and will be fixed in future versions
@@ -123,6 +124,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/hotels', hotelsRoutes);
+app.use('/api/menu-ocr', menuOcrRoutes);
 app.use('/api', publicRoutes);
 
 // Explicit API 404 JSON to avoid ambiguous plain text responses
@@ -155,7 +157,7 @@ const PORT = process.env.PORT || 3000;
 
 // Start server even if DB connection fails (will retry on requests)
 server.listen(PORT, () => {
-  console.log(`Server listening on ${PORT}`);
+  console.log(`[server] listening on port ${PORT}`);
   console.log(`Server ready at http://localhost:${PORT}`);
   // Initialize DB in background
   initDb()

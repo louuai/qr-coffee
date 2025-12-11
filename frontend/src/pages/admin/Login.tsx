@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import api from '../../api/axios';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   TextInput,
   PasswordInput,
@@ -10,14 +9,17 @@ import {
   Button,
   Text,
   Stack,
+  Anchor,
+  Group,
 } from '@mantine/core';
+import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [email, setEmail] = useState('admin@example.com');
-  const [password, setPassword] = useState('password');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -25,75 +27,72 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
-     // Remplacer la portion try { ... } par ce code :
-try {
-  // utilise l'instance axios centrale dont baseURL est http://localhost:3000/api
-  const response = await api.post('/auth/login', { email, password });
-  const token = response?.data?.token;
-  if (!token) {
-    setError('Aucun token reçu du serveur');
-    return;
-  }
-  login(token); // ton AuthContext doit stocker le token (localStorage.setItem('token', token))
-  navigate('/admin');
-} catch (err: any) {
-  const data = err?.response?.data;
-  if (data?.errors && Array.isArray(data.errors)) {
-    setError(data.errors.map((it: any) => it.msg || it.message).join('; '));
-  } else if (data?.message) {
-    setError(data.message);
-  } else if (data?.error) {
-    setError(data.error);
-  } else {
-    setError('Failed to login');
-  }
-      } finally {
-        setLoading(false);
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      const token = response?.data?.token;
+      if (!token) {
+        throw new Error('Token manquant dans la réponse serveur');
+      }
+      login(token);
+      navigate('/admin');
+    } catch (err: any) {
+      const data = err?.response?.data;
+      if (data?.errors && Array.isArray(data.errors)) {
+        setError(data.errors.map((it: any) => it.msg || it.message).join('; '));
+      } else if (data?.message) {
+        setError(data.message);
+      } else if (data?.error) {
+        setError(data.error);
+      } else {
+        setError('Connexion impossible. Vérifie tes identifiants.');
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <Container size={420} my={40}>
-      <Title ta="center" fw={900}>
-        Welcome back!
-      </Title>
-      <Text c="dimmed" size="sm" ta="center" mt={5}>
-        Enter your credentials to access your account
-      </Text>
+    <Container size={460} my={60}>
+      <Stack gap="xs" align="center">
+        <Title order={2} fw={800}>Connexion admin</Title>
+        <Text c="dimmed" size="sm">Accède à ton espace de gestion</Text>
+      </Stack>
 
-      <Paper withBorder shadow="md" p={30} mt={30} radius="md">
+      <Paper withBorder shadow="md" p={30} mt={25} radius="lg">
         <form onSubmit={handleSubmit}>
-          <Stack>
+          <Stack gap="md">
             <TextInput
               label="Email"
-              placeholder="your@email.com"
+              placeholder="admin@exemple.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-
             <PasswordInput
-              label="Password"
-              placeholder="Your password"
+              label="Mot de passe"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-
             {error && (
-              <Text c="red" size="sm">
+              <Text c="red" size="sm" fw={500}>
                 {error}
               </Text>
             )}
-
-            <Button type="submit" loading={loading}>
-              Sign in
+            <Button type="submit" loading={loading} fullWidth>
+              Se connecter
             </Button>
           </Stack>
         </form>
+
+        <Group justify="center" mt="md" gap={4}>
+          <Text size="sm" c="dimmed">Pas encore de compte ?</Text>
+          <Anchor component={Link} to="/admin/register" size="sm">
+            Créer un compte
+          </Anchor>
+        </Group>
       </Paper>
     </Container>
   );
 }
-

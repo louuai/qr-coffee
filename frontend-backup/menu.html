@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Menu | QR Coffee</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet" />
+</head>
+<body class="menu-page">
+    <header class="menu-header">
+        <div class="menu-header__brand">
+            <span class="menu-header__logo">QR</span>
+            <div>
+                <p class="menu-header__eyebrow">Coffee House</p>
+                <h1 class="menu-header__title">Menu Signature</h1>
+            </div>
+        </div>
+        <a class="menu-header__cta" href="/admin/" title="Accéder à l'administration">Espace Admin</a>
+    </header>
+
+    <main class="public-menu">
+        <section class="menu-hero-section">
+            <div class="menu-hero-card">
+                <p class="menu-hero-card__eyebrow">Sélection du jour</p>
+                <h2 class="menu-hero-card__title">Des recettes inspirées pour vos moments café.</h2>
+                <p class="menu-hero-card__subtitle">Nos baristas mettent à jour ce menu automatiquement grâce à notre système d'OCR intelligent.</p>
+            </div>
+        </section>
+
+        <section class="menu-content">
+            <p id="menu-status" class="menu-status">Chargement du menu...</p>
+            <div id="menu-container"></div>
+        </section>
+    </main>
+
+    <footer class="menu-footer">
+        <p>© QR Coffee — Service automatisé</p>
+    </footer>
+
+    <script src="/js/menu.js" defer></script>
+</body>
+</html>

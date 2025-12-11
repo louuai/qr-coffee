@@ -52,7 +52,7 @@ router.post(
   '/onboarding',
   adminAuth,
   body('businessName').isLength({ min: 2 }),
-  body('location').isLength({ min: 2 }),
+  body('location').optional().isLength({ min: 2 }),
   body('businessPhone').optional().isLength({ min: 3 }),
   body('personalPhone').optional().isLength({ min: 3 }),
   body('tablesCount').optional().isInt({ min: 1, max: 50 }),
@@ -62,7 +62,8 @@ router.post(
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: 'unauthorized' });
 
-    const { businessName, location, businessPhone, personalPhone } = req.body;
+    const { businessName, businessPhone, personalPhone } = req.body;
+    const location = (req.body.location || '').toString().trim() || 'N/A';
     const tablesCount = req.body.tablesCount ? Number(req.body.tablesCount) : 5;
     const baseSlug = slugifyName(businessName);
     let slug = baseSlug;

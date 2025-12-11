@@ -1,40 +1,46 @@
 {
-    "name":  "rasops-qr-backend",
-    "version":  "0.1.0",
-    "private":  true,
-    "scripts":  {
-                    "dev":  "ts-node-dev --respawn --transpile-only src/server.ts",
-                    "build":  "tsc -p .",
-                    "start":  "node --no-warnings dist/server.js",
-                    "migrate":  "sequelize db:migrate",
-                    "seed":  "ts-node src/seeders/seed-demo.ts",
-                    "test":  "jest --runInBand"
-                },
-    "dependencies":  {
-                         "bcrypt":  "^5.1.0",
-                         "cors":  "^2.8.5",
-                         "dotenv":  "^16.0.0",
-                         "engine.io":  "^6.6.4",
-                         "express":  "^4.21.2",
-                         "express-validator":  "^6.14.3",
-                         "helmet":  "^8.1.0",
-                         "jsonwebtoken":  "^9.0.0",
-                         "mysql2":  "^3.2.0",
-                         "qrcode":  "^1.5.1",
-                         "sequelize":  "^6.32.1",
-                         "socket.io":  "^4.8.1",
-                         "winston":  "^3.9.0"
-                     },
-    "devDependencies":  {
-                            "@types/bcrypt":  "^6.0.0",
-                            "@types/express":  "^4.17.17",
-                            "@types/jest":  "^29.5.3",
-                            "@types/jsonwebtoken":  "^9.0.2",
-                            "@types/node":  "^20.19.24",
-                            "jest":  "^29.6.1",
-                            "ts-jest":  "^29.1.1",
-                            "ts-node":  "^10.9.2",
-                            "ts-node-dev":  "^2.0.0",
-                            "typescript":  "^5.9.3"
-                        }
+    "name": "rasops-qr-backend",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+        "build": "tsc -p .",
+        "start": "node --no-warnings dist/server.js",
+        "migrate": "sequelize db:migrate",
+        "seed": "ts-node src/seeders/seed-demo.ts",
+        "test": "jest --runInBand"
+    },
+    "dependencies": {
+        "@google-cloud/documentai": "^9.5.0",
+        "axios": "^1.13.2",
+        "bcrypt": "^5.1.0",
+        "cors": "^2.8.5",
+        "dotenv": "^16.0.0",
+        "engine.io": "^6.6.4",
+        "express": "^4.21.2",
+        "express-validator": "^6.14.3",
+        "helmet": "^8.1.0",
+        "jsonwebtoken": "^9.0.0",
+        "multer": "^1.4.5-lts.1",
+        "mysql2": "^3.2.0",
+        "node-fetch": "^3.3.2",
+        "qrcode": "^1.5.1",
+        "sequelize": "^6.32.1",
+        "sharp": "^0.33.3",
+        "socket.io": "^4.8.1",
+        "tesseract.js": "^5.1.0",
+        "winston": "^3.9.0"
+    },
+    "devDependencies": {
+        "@types/bcrypt": "^6.0.0",
+        "@types/express": "^4.17.25",
+        "@types/jest": "^29.5.3",
+        "@types/jsonwebtoken": "^9.0.2",
+        "@types/node": "^20.19.24",
+        "jest": "^29.6.1",
+        "ts-jest": "^29.1.1",
+        "ts-node": "^10.9.2",
+        "ts-node-dev": "^2.0.0",
+        "typescript": "^5.9.3"
+    }
 }

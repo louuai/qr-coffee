@@ -2,7 +2,8 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { User } from '../models';
+import { User, Hotel, Table } from '../models';
+import { generateTableQr } from '../services/qrcode.service';
 import { adminAuth, type AuthRequest } from '../middlewares/auth';
 
 const router = express.Router();
@@ -16,13 +17,63 @@ router.post(
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const { name, email, password } = req.body;
     const passwordHash = await bcrypt.hash(password, 10);
+    const slugify = (value: string) =>
+      value
+        .toString()
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'business';
+
     try {
       const user = await (User as any).create({ name, email, passwordHash, role: 'admin' });
+
+      // Auto-provision a default hotel so the dashboard has data right after sign-up
+      try {
+        const baseName = (req.body.businessName || name || email.split('@')[0] || 'Mon Café').toString().trim();
+        const baseSlug = slugify(baseName);
+        let slug = baseSlug;
+        let counter = 1;
+        while (await (Hotel as any).findOne({ where: { slug } })) {
+          slug = `${baseSlug}-${counter++}`;
+        }
+
+        const tablesCount = Number(req.body.tablesCount || 5);
+        const hotel = await (Hotel as any).create({
+          name: baseName,
+          slug,
+          address: req.body.location || '',
+          location: req.body.location || '',
+          tablesCount,
+          ownerId: user.id,
+          onboardedAt: new Date(),
+        });
+
+        // Create tables + QR codes
+        for (let i = 1; i <= tablesCount; i++) {
+          const table = await (Table as any).create({ hotelId: hotel.id, number: i });
+          try {
+            const { path: qrPath } = await generateTableQr(hotel.id, slug, i);
+            table.qrPath = qrPath;
+            await table.save();
+          } catch (qrErr) {
+            console.warn('QR generation failed for table', i, qrErr);
+          }
+        }
+      } catch (provisionErr) {
+        console.warn('Auto-provisioning hotel failed', provisionErr);
+      }
+
       const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
       res.json({ id: user.id, email: user.email, token });
     } catch (err) {
-      console.error('Register error:', err && (err as any).message ? (err as any).message : err);
-      res.status(500).json({ error: 'failed to create user' });
+      const message = (err as any)?.message || err;
+      // Sequelize unique email constraint
+      if ((err as any)?.name === 'SequelizeUniqueConstraintError') {
+        return res.status(409).json({ error: 'email_already_exists' });
+      }
+      console.error('Register error:', message);
+      res.status(500).json({ error: 'failed to create user', message });
     }
   }
 );

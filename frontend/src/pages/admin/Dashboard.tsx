@@ -119,6 +119,19 @@ export default function Dashboard() {
     served: 'green',
   };
 
+  const statusClassMap: Record<TableStatus['status'], string> = {
+    idle: `${classes.statusBadge} ${classes.statusIdle}`,
+    new: `${classes.statusBadge} ${classes.statusNew}`,
+    in_progress: `${classes.statusBadge} ${classes.statusInProgress}`,
+    served: `${classes.statusBadge} ${classes.statusServed}`,
+  };
+
+  const heroStatsData = [
+    { label: 'Tables actives', value: `${activeTables}/${totalTables || 0}` },
+    { label: 'Commandes en attente', value: unreadOrders.toString() },
+    { label: 'Clients aujourd’hui', value: '24' },
+  ];
+
   if (hotelLoading) {
     return <Text>Loading hotel...</Text>;
   }
@@ -132,117 +145,145 @@ export default function Dashboard() {
   }
 
   return (
-    <>
-      <Title order={2} mb="md">Dashboard - {hotel?.name || currentHotel?.name}</Title>
+    <div className={classes.dashboardRoot}>
+      <div className={classes.dashboardShell}>
+        <section className={`${classes.hero} ${classes.fadeIn}`}>
+          <div className={classes.heroContent}>
+            <span className={classes.heroBadge}>Opérations café premium</span>
+            <Title order={1} className={classes.heroTitle}>
+              Dashboard – {hotel?.name || currentHotel?.name}
+            </Title>
+            <Text className={classes.heroSubtitle}>
+              Supervisez vos tables, commandes et clients avec un style barista moderne. Ce hub est prêt
+              pour des expériences 3D immersives.
+            </Text>
+            <div className={classes.heroStats}>
+              {heroStatsData.map((item) => (
+                <div key={item.label} className={classes.heroStat}>
+                  <p className={classes.heroStatLabel}>{item.label}</p>
+                  <p className={classes.heroStatValue}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+            <div className={classes.heroActions}>
+              <button type="button" className={classes.heroButton}>
+                Gérer les commandes
+              </button>
+              <button type="button" className={classes.heroGhostButton}>
+                Voir le menu
+              </button>
+            </div>
+          </div>
+          <div className={classes.hero3dWrapper}>
+            <div className={classes.hero3dPlaceholder}>
+              <span>☕</span>
+              <Text c="dimmed" ta="center" size="sm">
+                Espace réservé pour une future scène 3D (Three.js)
+              </Text>
+            </div>
+          </div>
+        </section>
 
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} mb="xl">
-        {stats.map((stat) => (
-          <Paper key={stat.title} p="md" radius="md" className={classes.card}>
-            <Group justify="space-between">
-              {stat.icon}
-              <div>
-                <Text c="dimmed" size="xs" tt="uppercase" fw={700}>
-                  {stat.title}
-                </Text>
-                <Text fw={700} size="xl">
-                  {stat.value}
-                </Text>
-              </div>
-            </Group>
-          </Paper>
-        ))}
-      </SimpleGrid>
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} mb="xl" className={classes.slideUp}>
+          {stats.map((stat) => (
+            <Paper key={stat.title} className={classes.statCard}>
+              <Group justify="space-between">
+                {stat.icon}
+                <div>
+                  <Text size="xs" tt="uppercase" fw={600} c="dimmed">
+                    {stat.title}
+                  </Text>
+                  <Text fw={700} size="xl">
+                    {stat.value}
+                  </Text>
+                </div>
+              </Group>
+            </Paper>
+          ))}
+        </SimpleGrid>
 
-      <Grid>
-        <Grid.Col span={8}>
-          <Card withBorder radius="md" className={classes.card}>
+        <div className={classes.contentGrid}>
+          <Card withBorder radius="xl" className={`${classes.card} ${classes.slideUp}`}>
             <Card.Section className={classes.section}>
               <Group justify="space-between">
-                <Text fw={500}>Active Tables</Text>
-                <Badge size="sm">Real-time</Badge>
+                <Text fw={500}>Tables actives</Text>
+                <Badge size="sm">Temps réel</Badge>
               </Group>
             </Card.Section>
 
-            <Card.Section p="md">
-              <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md">
-                {tables.map((table) => (
-                  <Paper 
-                    key={table.id} 
-                    p="md" 
-                    radius="md" 
-                    withBorder
-                    style={{
-                      borderColor: table.status === 'new' ? 'var(--mantine-color-blue-6)' : undefined,
-                      borderWidth: table.status === 'new' ? '2px' : '1px',
-                    }}
-                  >
-                    <Stack gap="xs" align="center">
-                      <Text size="lg" fw={500}>
-                        Table {table.number}
+            <div className={classes.tableGrid}>
+              {tables.map((table) => (
+                <Paper key={table.id} className={classes.tableCard} withBorder={false}>
+                  <Stack gap="xs" align="center">
+                    <Text size="lg" fw={600}>
+                      Table {table.number}
+                    </Text>
+                    <Badge
+                      color={statusColors[table.status]}
+                      className={statusClassMap[table.status]}
+                      variant="light"
+                    >
+                      {table.status.replace('_', ' ')}
+                    </Badge>
+                    {table.unreadOrders ? (
+                      <Text size="sm" className={classes.unreadTag} fw={500}>
+                        {table.unreadOrders} new orders
                       </Text>
-                      <Badge color={statusColors[table.status]}>
-                        {table.status.replace('_', ' ')}
-                      </Badge>
-                      {table.unreadOrders ? (
-                        <Text size="sm" c="blue" fw={500}>
-                          {table.unreadOrders} new orders
-                        </Text>
-                      ) : null}
-                    </Stack>
-                  </Paper>
-                ))}
-              </SimpleGrid>
-            </Card.Section>
+                    ) : null}
+                  </Stack>
+                </Paper>
+              ))}
+            </div>
           </Card>
-        </Grid.Col>
 
-        <Grid.Col span={4}>
-          <Card withBorder radius="md" className={classes.card} style={{ height: '100%' }}>
+          <Card withBorder radius="xl" className={`${classes.card} ${classes.slideUp}`} style={{ height: '100%' }}>
             <Card.Section className={classes.section}>
               <Group justify="space-between">
-                <Text fw={500}>Table Status</Text>
-                <Badge size="sm">Real-time</Badge>
+                <Text fw={500}>Statut des tables</Text>
+                <Badge size="sm">Temps réel</Badge>
               </Group>
             </Card.Section>
 
-            <Card.Section p="md">
-              <Center py="md">
+            <div className={classes.ringWrapper}>
+              <Center>
                 <RingProgress
-                  size={180}
+                  size={190}
                   roundCaps
-                  thickness={8}
+                  thickness={10}
                   sections={[
-                    { value: (activeTables / totalTables) * 100, color: 'blue' },
-                    { value: ((totalTables - activeTables) / totalTables) * 100, color: 'gray' },
+                    { value: totalTables ? (activeTables / totalTables) * 100 : 0, color: 'blue' },
+                    { value: totalTables ? ((totalTables - activeTables) / totalTables) * 100 : 0, color: 'gray' },
                   ]}
                   label={
-                    <Text size="xl" ta="center" px="xs" style={{ pointerEvents: 'none' }}>
-                      {Math.round((activeTables / totalTables) * 100)}%
+                    <Text size="xl" ta="center" px="xs" className={classes.ringLabel}>
+                      {totalTables ? Math.round((activeTables / totalTables) * 100) : 0}%
                     </Text>
                   }
                 />
               </Center>
-              <Stack gap="xs" mt="md">
-                <Group justify="space-between">
-                  <Group gap="xs">
-                    <Badge color="blue" size="sm" variant="dot" />
-                    <Text size="sm">Active</Text>
-                  </Group>
-                  <Text size="sm" fw={500}>{activeTables} tables</Text>
-                </Group>
-                <Group justify="space-between">
-                  <Group gap="xs">
-                    <Badge color="gray" size="sm" variant="dot" />
-                    <Text size="sm">Idle</Text>
-                  </Group>
-                  <Text size="sm" fw={500}>{totalTables - activeTables} tables</Text>
-                </Group>
-              </Stack>
-            </Card.Section>
+              <div className={classes.metricRow}>
+                <div className={classes.metricIndicator}>
+                  <span className={`${classes.indicatorDot} ${classes.indicatorActive}`} />
+                  <Text size="sm">Active</Text>
+                </div>
+                <Text size="sm" fw={500}>
+                  {activeTables} tables
+                </Text>
+              </div>
+              <div className={classes.metricRow}>
+                <div className={classes.metricIndicator}>
+                  <span className={`${classes.indicatorDot} ${classes.indicatorIdle}`} />
+                  <Text size="sm">Idle</Text>
+                </div>
+                <Text size="sm" fw={500}>
+                  {totalTables - activeTables} tables
+                </Text>
+              </div>
+            </div>
           </Card>
-        </Grid.Col>
-      </Grid>
-    </>
+        </div>
+      </div>
+    </div>
   );
 }
 

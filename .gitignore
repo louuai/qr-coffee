@@ -9,6 +9,8 @@ build/
 /backend/.env
 /frontend/.env
 /backend/public/qrcodes/*.png
+backend/uploads/
+frontend-backup/qr-coffee-ocr-*.json
 coverage/
 npm-debug.log
 .DS_Store
